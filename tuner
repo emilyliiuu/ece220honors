@@ -1,0 +1,135 @@
+# -*- coding: utf-8 -*-
+"""
+In this program, a simple pitch tuner will be implemented. Using concert A
+as a reference point (the most common pitch in modern music), the closest 
+note to the pitch being recieved in the microphone will be calculated using
+a formula derived using the equal temperament, 12 tone scale, with each note
+being a half step from the previous. 
+"""
+import pandas as pd
+import numpy as np
+import pyaudio
+from scipy.fft import fft
+import sounddevice as sd
+import os
+import traceback
+
+#initializing some variables that will be useful throughout the whole program
+RATE = 44100            #sample rate
+CHUNK = 1024            #chunk size
+WINDOW_SIZE =  44100    #threshold for detecting notes
+note_detected = False
+window_samples = [0 for _ in range(WINDOW_SIZE)]
+p = pyaudio.PyAudio()
+notes = ["A","A#","B","C","C#","D","D#","E","F","F#","G","G#"] #list of all possible notes
+concert_a = 440           #concert pitch is 440 hz
+a = 2**(1/12)
+recorded = []
+actual = []
+deviation = []
+"""
+input: frequency from mic
+output: closest letter note, frequency of that letter note
+"""
+
+def closest_note(freq):
+    n = int(np.round(np.emath.logn(a, (freq/concert_a))))
+    idx = n%12          
+    note = notes[idx]               #find corresponding note from note list
+    note += str(4+(n+9)//12)         #add octave number using formula
+    note_freq = concert_a*2**(n/12) #plug calculated note back into formula to calculate freq
+    return note, note_freq
+
+"""
+intput: frequency from mic
+output: difference in cents between input pitch to expected pitch
+"""
+def calculate_cents(in_freq, note_freq):
+    dif = 1200*np.emath.logn(2, in_freq/note_freq)
+    return dif
+
+"""
+input: frequency from mic
+function used for testing
+output: -1 if flat, 0 if in tune, 1 if sharp
+"""    
+# lets give this a tolerance of 10 cents
+def in_tune(freq):
+    note, note_freq = closest_note(freq)
+    dif = calculate_cents(freq, note_freq)
+    if(dif<-10):
+        return -1
+    elif(dif>10):
+        return 1
+    else:
+        return 0
+
+"""
+function used for testing
+input: any frequency (test or from mic)
+output: text telling user what note is being played, the difference in hz, and 
+whether it is sharp, flat, or in tune
+"""
+def output(freq):
+    note, note_freq = closest_note(freq)
+    print(note, "is supposed to be", round(note_freq, 2), "hz but played", round(freq, 2), "hz")
+    dif = calculate_cents(freq, note_freq)
+    intonation = in_tune(freq)
+    if(intonation<0):
+        print("you are", round(abs(dif), 2), "cents flat")
+    elif(intonation>0):
+        print("you are", round(abs(dif), 2), "cents sharp")
+    else:
+        print("you are in tune :)")
+    
+"""
+write code to take in audio input from microphone, save as a analyzable format
+
+"""
+def callback(in_data, frame_count, time_info, status, recorded, actual, deviation):
+  global window_samples
+  if status:
+    print(status)
+  if any(in_data):
+    window_samples = np.concatenate((window_samples,in_data[:, 0])) #add new samples to array
+    window_samples = window_samples[len(in_data[:, 0]):] #remove old samples from array
+    magnitude_spec = abs(fft(window_samples)[:len(window_samples)]) #find magnitude spectrum of fast fourier transform
+    #this helps to describe a signal using frequency and amplitude!!!
+
+    for i in range(int(190/(RATE/WINDOW_SIZE))):
+      magnitude_spec[i] = 0 #gets rid of any frequencies below 196 hertz, which is just below the frequency of the
+      #lowest string on a violin, which is a G3 (this is coded by a violinist)
+
+    max_index = np.argmax(magnitude_spec)       #find the maximum 
+    max_frequency = max_index * (RATE/WINDOW_SIZE)
+    closestNote, closestPitch = closest_note(max_frequency)
+    cents = calculate_cents(max_frequency, closestPitch)
+    
+    recorded.append(max_frequency)
+    actual.append(closestPitch)
+    deviation.append(cents)
+    os.system('cls' if os.name=='nt' else 'clear')
+    print(f"Closest note: {closestNote} {max_frequency:.1f}/{closestPitch:.1f}")
+  else:
+    print('no input')
+    
+    
+
+df = pd.DataFrame()
+    
+    
+try:
+    should_continue = True
+    with sd.InputStream(channels= 1, 
+                        callback = lambda in_data, frame_count, time_info, status: callback(in_data, frame_count, time_info, status, recorded, actual, deviation),
+                        blocksize = WINDOW_SIZE,
+                        samplerate = RATE):
+        while True:
+            pass
+except KeyboardInterrupt:
+    should_continue = False
+
+df["Recorded Frequency (hz)"] = recorded
+df["In tune frequency (hz)"] = actual
+df["Deviation (cents)"] = deviation
+print(df)
