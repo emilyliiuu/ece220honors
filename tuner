@@ -27,6 +27,8 @@ a = 2**(1/12)
 recorded = []
 actual = []
 deviation = []
+note_played = []
+intune = []
 """
 input: frequency from mic
 output: closest letter note, frequency of that letter note
@@ -86,7 +88,7 @@ def output(freq):
 write code to take in audio input from microphone, save as a analyzable format
 
 """
-def callback(in_data, frame_count, time_info, status, recorded, actual, deviation):
+def callback(in_data, frame_count, time_info, status, recorded, actual, deviation, note_played, intune):
   global window_samples
   if status:
     print(status)
@@ -108,6 +110,8 @@ def callback(in_data, frame_count, time_info, status, recorded, actual, deviatio
     recorded.append(max_frequency)
     actual.append(closestPitch)
     deviation.append(cents)
+    note_played.append(closestNote)
+    intune.append(in_tune(max_frequency))
     os.system('cls' if os.name=='nt' else 'clear')
     print(f"Closest note: {closestNote} {max_frequency:.1f}/{closestPitch:.1f}")
   else:
@@ -121,7 +125,7 @@ df = pd.DataFrame()
 try:
     should_continue = True
     with sd.InputStream(channels= 1, 
-                        callback = lambda in_data, frame_count, time_info, status: callback(in_data, frame_count, time_info, status, recorded, actual, deviation),
+                        callback = lambda in_data, frame_count, time_info, status: callback(in_data, frame_count, time_info, status, recorded, actual, deviation, note_played, intune),
                         blocksize = WINDOW_SIZE,
                         samplerate = RATE):
         while True:
@@ -130,6 +134,8 @@ except KeyboardInterrupt:
     should_continue = False
 
 df["Recorded Frequency (hz)"] = recorded
+df["Note Played"] = note_played
 df["In tune frequency (hz)"] = actual
 df["Deviation (cents)"] = deviation
+df["In tune?"] = intune
 print(df)
